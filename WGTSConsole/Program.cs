@@ -1,21 +1,17 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO.Ports;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Controls;
+using System.Threading;
 
-namespace WGTS
+namespace WGTSConsole
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
-    public partial class MainWindow : Window
+    public class Program
     {
-        private SerialPort serial = new SerialPort();
-        private string g_sRecvData = String.Empty;
-        public static bool isClosing = false;
+        private static SerialPort serial = new SerialPort();
+        private static string g_sRecvData = String.Empty;
+        public static int counter = 0;
+        public static int counterForceCloseLimit = 5;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct SYSTEMTIME
@@ -33,49 +29,61 @@ namespace WGTS
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool SetSystemTime(ref SYSTEMTIME st);
 
-        public MainWindow()
-        {
-            InitializeComponent();
-
-            Loaded += new RoutedEventHandler(InitSerialPort);
-        }
-
-        private void InitSerialPort(object sender, EventArgs e)
+        public static void Main(string[] args)
         {
             serial.DataReceived += new SerialDataReceivedEventHandler(serial_DataReceived);
 
             string[] ports = SerialPort.GetPortNames();
 
-            foreach (string port in ports)
+            if (ports.Length != 0)
             {
-                cbComPort.Items.Add(port);
-            }
+                serial.PortName = ports[0];
+                serial.BaudRate = 9600;
+                serial.StopBits = StopBits.One;
+                serial.Parity = Parity.None;
+                serial.DataBits = 8;
 
-            cbComPort.SelectedIndex = 0;
-        }
-
-        private void OpenComPort(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                serial.Open();
-            }
-            catch
-            {
-                cbComPort.SelectedItem = "";
-            }
-        }
-
-        private void serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
-        {
-            try
-            {
-                if (isClosing)
+                if (serial.IsOpen)
                 {
                     serial.Close();
-                    return;
+                }
+                else
+                {
+                    serial.Open();
+                }
+            }
+            else
+            {
+                Console.WriteLine("연결된 시리얼포트를 찾지 못했습니다.");
+                Environment.Exit(-2);
+            }
+
+            int counterForceClose = 0;
+
+            while (true)
+            {
+                if (counter >= 3)
+                {
+                    serial.Close();
+                    Environment.Exit(0);
                 }
 
+                Thread.Sleep(1500);
+
+                counterForceClose++;
+
+                if (counterForceClose >= counterForceCloseLimit)
+                {
+                    Console.WriteLine("시간 초과로 종료합니다.");
+                    Environment.Exit(-2);
+                }
+            }
+        }
+
+        private static void serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            try
+            {
                 g_sRecvData = String.Empty;
 
                 try
@@ -113,27 +121,23 @@ namespace WGTS
                         DateTime.TryParseExact(dtraw, "ddMMyy HHmmss.ff", CultureInfo.CurrentCulture,
                             DateTimeStyles.None, out dt);
                         utcfull = "UTC: " + dt.ToString();
+                        Console.WriteLine(utcfull);
 
                         setWindowsTime(dt);
                     }
 
-                    Dispatcher.Invoke(
-                        System.Windows.Threading.DispatcherPriority.Normal, new Action(delegate
-                        {
-                            tbRecvData.Text = g_sRecvData;
-                            tbConvertedTime.Text = utcfull;
-                        }));
+                    counter++;
                 }
             }
-            catch (TimeoutException)
+            catch (Exception)
             {
                 g_sRecvData = string.Empty;
-                MessageBox.Show("시간 동기화가 정상적으로 이루어지지 않았습니다.");
-                Close();
+                Console.WriteLine("시간 동기화가 정상적으로 이루어지지 않았습니다.");
+                Environment.Exit(-1);
             }
         }
 
-        private void setWindowsTime(DateTime dt)
+        private static void setWindowsTime(DateTime dt)
         {
 
             SYSTEMTIME st = new SYSTEMTIME();
@@ -148,57 +152,6 @@ namespace WGTS
 
             // UTC automatically adjust to timezone of PC (on Windows)
             SetSystemTime(ref st);
-        }
-
-        private void btnRefresh_Click(object sender, RoutedEventArgs e)
-        {
-            serial.DataReceived += new SerialDataReceivedEventHandler(serial_DataReceived);
-
-            string[] ports = SerialPort.GetPortNames();
-
-            if (ports.Length < 1)
-            {
-                cbComPort.Items.Clear();
-            }
-            else
-            {
-                cbComPort.Items.Clear();
-                foreach (string port in ports)
-                {
-                    cbComPort.Items.Add(port);
-                }
-            }
-        }
-
-        private void cbComPort_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (serial.IsOpen)
-            {
-                serial.Close();
-            }
-
-            if (cbComPort.SelectedItem != null)
-            {
-                serial.PortName = cbComPort.SelectedItem.ToString();
-                serial.BaudRate = 9600;
-                serial.StopBits = StopBits.One;
-                serial.Parity = Parity.None;
-                serial.DataBits = 8;
-
-                if (serial.IsOpen)
-                {
-                    serial.Close();
-                }
-                else
-                {
-                    OpenComPort(sender, e);
-                }
-            }
-        }
-
-        private void Window_Closing(object sender, EventArgs e)
-        {
-            isClosing = true;
         }
     }
 }
