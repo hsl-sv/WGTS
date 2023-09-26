@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.IO.Ports;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -12,8 +14,8 @@ namespace WGTSConsole
         private static string g_sRecvData = String.Empty;
         public static bool serial_gps_received = false;
         public static int serial_port_number = 0;
-        public static int counter = 0;
-        public static int counterForceCloseLimit = 10;
+        public static string logPath = "C:\\WGTSLog\\log.log";
+        public static Stopwatch stopwatch = new Stopwatch();
 
         [StructLayout(LayoutKind.Sequential)]
         public struct SYSTEMTIME
@@ -33,33 +35,28 @@ namespace WGTSConsole
 
         public static void Main(string[] args)
         {
-            serial.DataReceived += new SerialDataReceivedEventHandler(serial_DataReceived);            
-
-            int counterForceClose = 0;
-
-            while (true)
+            if (!Directory.Exists("C:\\WGTSLog"))
             {
-                if (counter >= 5)
-                {
-                    serial.Close();
-                    Environment.Exit(0);
-                }
+                Directory.CreateDirectory("C:\\WGTSLog");
+            }
 
-                Thread.Sleep(1000);
+            File.AppendAllText(logPath, "\n=== WGTS Sync Start, Before Sync ===");
+            File.AppendAllText(logPath, '\n' + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.ffffff"));
 
-                counterForceClose++;
+            stopwatch.Start();
 
-                if (counterForceClose >= counterForceCloseLimit)
-                {
-                    serial.Close();
-                    Console.WriteLine("Time expired - 시간 초과로 종료합니다.");
-                    Environment.Exit(-2);
-                }
+            serial.DataReceived += new SerialDataReceivedEventHandler(serial_DataReceived);
+            serial.ErrorReceived += new SerialErrorReceivedEventHandler(serial_ErrorReceived);
+
+            while (!serial_gps_received)
+            {
+                Thread.Sleep(3000);
 
                 if (!serial_gps_received)
                 {
                     serial.Close();
                     serial_OpenPort();
+
                     serial_port_number += 1;
                 }
             }
@@ -69,15 +66,23 @@ namespace WGTSConsole
         {
             string[] ports = SerialPort.GetPortNames();
 
-            if (ports.Length < serial_port_number + 1)
+            if (ports.Length == 0)
             {
-                Console.WriteLine("GPS port not found - GPS가 연결된 시리얼포트를 찾지 못했습니다.");
+                Console.WriteLine("GPS port not found - GPS가 연결된 시리얼포트를 찾지 못했습니다. (재시도 중)");
+                File.AppendAllText(logPath, '\n' + "GPS port not found - GPS가 연결된 시리얼포트를 찾지 못했습니다. (재시도 중)");
+
                 Thread.Sleep(3000);
-                Environment.Exit(-2);
+                return;
+            }
+
+            if (ports.Length <= serial_port_number)
+            {
+                serial_port_number = 0;
             }
 
             Console.WriteLine("Discovered COM ports : " + ports.Length + ", Trying COM port #" + serial_port_number.ToString() + "...");
             Console.WriteLine("발견 포트 개수 : " + ports.Length + ", " + serial_port_number.ToString() + "번 포트 시도 중...");
+            File.AppendAllText(logPath, '\n' + "발견 포트 개수 : " + ports.Length + ", " + serial_port_number.ToString() + "번 포트 시도 중...");
 
             if (ports.Length != 0)
             {
@@ -89,7 +94,9 @@ namespace WGTSConsole
 
                 if (serial.IsOpen)
                 {
-                    serial.Close();
+                    Console.WriteLine("COM ports already in use - 이미 사용 중인 COM 포트입니다.");
+                    File.AppendAllText(logPath, '\n' + "COM ports already in use - 이미 사용 중인 COM 포트입니다.");
+                    return;
                 }
                 else
                 {
@@ -99,8 +106,18 @@ namespace WGTSConsole
             else
             {
                 Console.WriteLine("No available COM ports - 연결된 시리얼포트를 찾지 못했습니다.");
-                Environment.Exit(-2);
+                File.AppendAllText(logPath, '\n' + "No available COM ports - 연결된 시리얼포트를 찾지 못했습니다.");
+                return;
             }
+        }
+
+        private static void serial_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+        {
+            File.AppendAllText(logPath, '\n' + "시리얼 에러 탐지 -> " + e.ToString());
+
+            serial_port_number += 1;
+
+            Console.WriteLine(serial_port_number);
         }
 
         private static void serial_DataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -149,22 +166,31 @@ namespace WGTSConsole
 
                         setWindowsTime(dt);
 
+                        stopwatch.Stop();
+                        TimeSpan ts = stopwatch.Elapsed;
+
                         Console.WriteLine("Time synchronization success - 시간 동기화 성공");
+                        File.AppendAllText(logPath, '\n' + "Time synchronization success - 시간 동기화 성공");
+
+                        File.AppendAllText(logPath, "\n=== WGTS Sync Elapsed Time===");
+                        File.AppendAllText(logPath, '\n' + String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                            ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds / 10));
+                        File.AppendAllText(logPath, "\n=== WGTS Sync Finished, After Sync ===");
+                        File.AppendAllText(logPath, '\n' + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.ffffff"));
 
                         serial.Close();
                         Thread.Sleep(3000);
                         Environment.Exit(0);
                         return;
                     }
-
-                    counter++;
                 }
             }
             catch (Exception)
             {
                 g_sRecvData = string.Empty;
                 Console.WriteLine("Unable to synchronize time - 시간 동기화가 정상적으로 이루어지지 않았습니다.");
-                Environment.Exit(-1);
+                File.AppendAllText(logPath, '\n' + "Unable to synchronize time - 시간 동기화가 정상적으로 이루어지지 않았습니다. (재시도 중)");
+                return;
             }
         }
 
