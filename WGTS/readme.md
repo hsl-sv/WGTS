@@ -6,4 +6,6 @@ using .net Core 3.1, WPF and Administrator permission, Tested on Windows 11 + PL
 
 Feel free to change format if you need,
 
-Check GPS2Time from vk2adc if not Windows 11.
+*** IT IS NOT USING NTP SO MAY EXIST TIME DIFFERENCE ***
+
+Check GPS2Time from VK4ADC if not Windows 11.
