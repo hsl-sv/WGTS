@@ -14,6 +14,7 @@ namespace WGTSConsole
         private static string g_sRecvData = String.Empty;
         public static bool serial_gps_received = false;
         public static int serial_port_number = 0;
+        public static int serial_fail_count = 0;
         public static string logPath = "C:\\WGTSLog\\log.log";
         public static Stopwatch stopwatch = new Stopwatch();
 
@@ -58,6 +59,34 @@ namespace WGTSConsole
                     serial_OpenPort();
 
                     serial_port_number += 1;
+                }
+
+                serial_fail_count += 1;
+
+                // Timeout, tyring w32tm
+                if (serial_fail_count >= 5)
+                {
+                    Console.WriteLine("Timeout, trying Windows time service - 재시도 시간 초과, Windows 시간 동기를 시도합니다.");
+                    File.AppendAllText(logPath, '\n' + "Timeout, trying Windows time service - 재시도 시간 초과, Windows 시간 동기를 시도합니다.");
+
+                    ProcessStartInfo pri = new ProcessStartInfo();
+                    Process pro = new Process();
+
+                    pri.FileName = "cmd.exe";
+                    pri.UseShellExecute = false;
+                    pri.Arguments = "/c net start w32time & w32tm -config -update & w32tm -resync -rediscover & w32tm -resync -nowait";
+                    pri.RedirectStandardOutput = true;
+
+                    pro.StartInfo = pri;
+                    pro.Start();
+                    string output = pro.StandardOutput.ReadToEnd();
+
+                    Console.WriteLine(output);
+                    File.AppendAllText(logPath, '\n' + output);
+
+                    pro.WaitForExit();
+
+                    Environment.Exit(0);
                 }
             }
         }
